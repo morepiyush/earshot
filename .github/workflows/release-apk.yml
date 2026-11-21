@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0-per-ear-eq)'
+        required: true
+        default: 'v0.1.0-per-ear-eq'
 
 permissions:
   contents: write
@@ -24,19 +29,39 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build FOSS Debug APK
+      - name: Configure Gradle heaps
         run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" >> ~/.gradle/gradle.properties
+          echo "kotlin.daemon.jvmargs=-Xmx4g" >> ~/.gradle/gradle.properties
           chmod +x gradlew
-          ./gradlew :app:assembleFossDebug --console=plain
+
+      - name: Decode keystore and create keystore.properties
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          cat <<EOF > keystore.properties
+          storeFile=release.jks
+          storePassword=${KEYSTORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
+
+      - name: Build Signed FOSS Release APK
+        run: ./gradlew :app:assembleFossRelease --console=plain
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: earshot-foss-debug-apk
-          path: app/build/outputs/apk/foss/debug/*.apk
+          name: earshot-foss-release-apk
+          path: app/build/outputs/apk/foss/release/app-foss-release.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: app/build/outputs/apk/foss/debug/*.apk
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: app/build/outputs/apk/foss/release/app-foss-release.apk
